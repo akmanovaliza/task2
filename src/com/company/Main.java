@@ -5,7 +5,18 @@ import java.nio.charset.StandardCharsets;
 
 public class Main {
 
-    public static void main(String[] args) {
+    // Сюда записываем результат
+    private static final StringBuilder resultStringBuilder = new StringBuilder();
+
+    // Предыдущее значение
+    // Используем volatile для синхронизации, чтобы брать значение напрямую из памяти в обход кэша jvm
+    private static volatile int previousValue;
+
+    // Наличие предыдущего значения
+    // Используем volatile для синхронизации, чтобы брать значение напрямую из памяти в обход кэша jvm
+    private static volatile boolean hasPreviousValue = false;
+
+    public static void main(String[] args) throws IOException {
         // Путь к файлу с входными значениями
         final String input = "C:\\Users\\akmanova.elizaveta\\Desktop\\streams\\input.txt";
         // Путь к файлу, в который запишется результат
@@ -13,37 +24,68 @@ public class Main {
         // Пороговое значение
         final int threshold = 3;
 
-        final String result = readFromFileAndExecute(input, threshold);
-        writeIntoFile(output, result);
+        final BufferedReader bufferedReader = readFromFile(input);
+
+        // Создаём 2 потока с использованием Runnable
+        final Runnable thread1 = () -> {
+            try {
+                execute(bufferedReader, threshold);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        };
+        final Runnable thread2 = () -> {
+            try {
+                execute(bufferedReader, threshold);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        };
+
+        // Запускаем потоки
+        thread1.run();
+        thread2.run();
+
+        // Записываем результат в файл
+        writeIntoFile(output, resultStringBuilder.toString());
     }
 
     /**
      * Чтение из файла и "отбор" подходящих значений для output стрима
      * @param fileName Путь к файлу
-     * @param threshold Пороговое значение
-     * @return Итоговый результат
+     * @return Входящий stream
      */
-    private static String readFromFileAndExecute(final String fileName, final int threshold) {
-        final StringBuilder resultStringBuilder = new StringBuilder();
+    private static BufferedReader readFromFile(final String fileName) throws IOException {
         // Создаём входящий стрим (канал), из которого формируем reader
-        try (final BufferedReader br = new BufferedReader(new InputStreamReader(new FileInputStream(fileName)))) {
-            String line;
-            Integer previousValue = null;
-            // Построчно считываем данные
-            while ((line = br.readLine()) != null) {
-                // Значение в текущей строке
-                final int value = Integer.parseInt(line);
-                // Проверка выполнения условия для записи в выходящий канад
-                if (previousValue != null && checkCondition(value - previousValue, threshold)) {
-                    resultStringBuilder.append(line).append("\n");
-                }
-                // Сетим предыдущее значение
-                previousValue = value;
-            }
-        } catch (final IOException e) {
-            System.out.println("Произошла ошибка при чтении из файла");
+        return new BufferedReader(new InputStreamReader(new FileInputStream(fileName)));
+    }
+
+    /**
+     * "отбор" подходящих значений для output стрима
+     * @param br Входящий стрим
+     * @param threshold Пороговое значение
+     */
+    private static void execute(final BufferedReader br, final int threshold) throws IOException {
+        if (br == null) {
+            return;
         }
-        return resultStringBuilder.toString();
+        final String line;
+        synchronized (Main.class) {
+            line = br.readLine();
+        }
+        if (line == null) {
+            return;
+        }
+        // Значение в текущей строке
+        final int value = Integer.parseInt(line);
+        // Проверка выполнения условия для записи в выходящий канал
+        if (hasPreviousValue && checkCondition(value - previousValue, threshold)) {
+            resultStringBuilder.append(line).append("\n");
+        }
+        // Сетим предыдущее значение
+        previousValue = value;
+        hasPreviousValue = true;
+        execute(br, threshold);
     }
 
     /**
